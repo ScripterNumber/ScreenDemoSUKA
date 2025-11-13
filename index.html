@@ -234,6 +234,7 @@
                     };
                 } catch (err) {
                     alert('Ошибка доступа к экрану');
+                    peer.destroy();
                     return;
                 }
             });
@@ -252,11 +253,11 @@
             });
 
             peer.on('error', (err) => {
-                console.error(err);
+                alert('Ошибка: ' + err.type);
             });
         }
 
-        function joinRoom() {
+        async function joinRoom() {
             const inputRoomId = document.getElementById('roomInput').value.trim().toUpperCase();
             if (!inputRoomId) {
                 alert('Введите код комнаты');
@@ -265,6 +266,11 @@
 
             roomId = inputRoomId;
             isHost = false;
+
+            const dummyCanvas = document.createElement('canvas');
+            dummyCanvas.width = 1;
+            dummyCanvas.height = 1;
+            const dummyStream = dummyCanvas.captureStream();
 
             peer = new Peer({
                 config: {
@@ -276,31 +282,38 @@
             });
 
             peer.on('open', (id) => {
-                const call = peer.call(roomId, null);
-                
-                call.on('stream', (remoteStream) => {
-                    document.getElementById('video').srcObject = remoteStream;
-                    document.getElementById('info').style.display = 'block';
-                    document.getElementById('roomCode').textContent = roomId;
-                    document.getElementById('status').textContent = 'Подключено';
-                    document.getElementById('status').className = 'status online';
-                    document.getElementById('viewers').style.display = 'none';
-                });
+                setTimeout(() => {
+                    const call = peer.call(roomId, dummyStream);
+                    
+                    if (!call) {
+                        alert('Не удалось создать соединение');
+                        return;
+                    }
 
-                call.on('close', () => {
-                    document.getElementById('status').textContent = 'Отключено';
-                    document.getElementById('status').className = 'status offline';
-                });
+                    call.on('stream', (remoteStream) => {
+                        document.getElementById('video').srcObject = remoteStream;
+                        document.getElementById('info').style.display = 'block';
+                        document.getElementById('roomCode').textContent = roomId;
+                        document.getElementById('status').textContent = 'Подключено';
+                        document.getElementById('status').className = 'status online';
+                        document.getElementById('viewers').style.display = 'none';
+                    });
 
-                call.on('error', (err) => {
-                    alert('Не удалось подключиться к комнате');
-                });
+                    call.on('close', () => {
+                        document.getElementById('status').textContent = 'Отключено';
+                        document.getElementById('status').className = 'status offline';
+                    });
 
-                connections.push(call);
+                    call.on('error', (err) => {
+                        alert('Ошибка подключения: ' + err);
+                    });
+
+                    connections.push(call);
+                }, 500);
             });
 
             peer.on('error', (err) => {
-                alert('Комната не найдена или ошибка подключения');
+                alert('Комната не найдена: ' + err.type);
             });
         }
 

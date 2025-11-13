@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Share</title>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #00d9ff;
+        }
+        .controls {
+            background: #16213e;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        .btn-primary:hover {
+            background: #00b8d4;
+            transform: translateY(-2px);
+        }
+        .btn-danger {
+            background: #ff4757;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #ee5a6f;
+        }
+        input {
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #00d9ff;
+            border-radius: 5px;
+            background: #0f3460;
+            color: #eee;
+            width: 300px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #00b8d4;
+        }
+        .info {
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        .room-code {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00d9ff;
+            letter-spacing: 2px;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+        }
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .status {
+            padding: 8px 16px;
+            border-radius: 5px;
+            display: inline-block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .status.online {
+            background: #2ed573;
+            color: #1a1a2e;
+        }
+        .status.offline {
+            background: #ff4757;
+            color: white;
+        }
+        .viewers-count {
+            background: #0f3460;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: inline-block;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📺 Screen Share</h1>
+        
+        <div class="controls">
+            <div class="btn-group">
+                <button class="btn-primary" onclick="createRoom()">Создать комнату</button>
+                <input type="text" id="roomInput" placeholder="Введите код комнаты">
+                <button class="btn-primary" onclick="joinRoom()">Присоединиться</button>
+                <button class="btn-danger" onclick="stopShare()">Остановить</button>
+            </div>
+            
+            <div class="btn-group">
+                <label>Качество:</label>
+                <select id="quality" style="padding: 12px; border-radius: 5px; background: #0f3460; color: #eee; border: 2px solid #00d9ff; font-size: 16px;">
+                    <option value="720">720p</option>
+                    <option value="1080" selected>1080p</option>
+                    <option value="1440">1440p</option>
+                </select>
+                <label>FPS:</label>
+                <select id="fps" style="padding: 12px; border-radius: 5px; background: #0f3460; color: #eee; border: 2px solid #00d9ff; font-size: 16px;">
+                    <option value="30">30</option>
+                    <option value="60" selected>60</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            
+            <div class="info" id="info" style="display: none;">
+                <div>Код комнаты: <span class="room-code" id="roomCode"></span></div>
+                <span class="status offline" id="status">Offline</span>
+                <span class="viewers-count" id="viewers">Зрителей: 0</span>
+            </div>
+        </div>
+        
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <script>
+        let peer;
+        let localStream;
+        let roomId;
+        let isHost = false;
+        let connections = [];
+        let viewersCount = 0;
+
+        function generateRoomId() {
+            return Math.random().toString(36).substring(2, 10).toUpperCase();
+        }
+
+        function getConstraints() {
+            const quality = document.getElementById('quality').value;
+            const fps = document.getElementById('fps').value;
+            
+            const heights = {
+                '720': 720,
+                '1080': 1080,
+                '1440': 1440
+            };
+
+            return {
+                video: {
+                    width: { ideal: heights[quality] * 16/9 },
+                    height: { ideal: heights[quality] },
+                    frameRate: { ideal: parseInt(fps), max: parseInt(fps) }
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    sampleRate: 44100
+                }
+            };
+        }
+
+        async function createRoom() {
+            roomId = generateRoomId();
+            isHost = true;
+
+            peer = new Peer(roomId, {
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                }
+            });
+
+            peer.on('open', async (id) => {
+                document.getElementById('roomCode').textContent = id;
+                document.getElementById('info').style.display = 'block';
+                document.getElementById('status').textContent = 'Ожидание...';
+                document.getElementById('status').className = 'status offline';
+
+                try {
+                    localStream = await navigator.mediaDevices.getDisplayMedia(getConstraints());
+                    document.getElementById('video').srcObject = localStream;
+                    document.getElementById('status').textContent = 'Online';
+                    document.getElementById('status').className = 'status online';
+
+                    localStream.getVideoTracks()[0].onended = () => {
+                        stopShare();
+                    };
+                } catch (err) {
+                    alert('Ошибка доступа к экрану');
+                    return;
+                }
+            });
+
+            peer.on('call', (call) => {
+                call.answer(localStream);
+                connections.push(call);
+                viewersCount++;
+                updateViewersCount();
+
+                call.on('close', () => {
+                    connections = connections.filter(c => c !== call);
+                    viewersCount--;
+                    updateViewersCount();
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+            });
+        }
+
+        function joinRoom() {
+            const inputRoomId = document.getElementById('roomInput').value.trim().toUpperCase();
+            if (!inputRoomId) {
+                alert('Введите код комнаты');
+                return;
+            }
+
+            roomId = inputRoomId;
+            isHost = false;
+
+            peer = new Peer({
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                }
+            });
+
+            peer.on('open', (id) => {
+                const call = peer.call(roomId, null);
+                
+                call.on('stream', (remoteStream) => {
+                    document.getElementById('video').srcObject = remoteStream;
+                    document.getElementById('info').style.display = 'block';
+                    document.getElementById('roomCode').textContent = roomId;
+                    document.getElementById('status').textContent = 'Подключено';
+                    document.getElementById('status').className = 'status online';
+                    document.getElementById('viewers').style.display = 'none';
+                });
+
+                call.on('close', () => {
+                    document.getElementById('status').textContent = 'Отключено';
+                    document.getElementById('status').className = 'status offline';
+                });
+
+                call.on('error', (err) => {
+                    alert('Не удалось подключиться к комнате');
+                });
+
+                connections.push(call);
+            });
+
+            peer.on('error', (err) => {
+                alert('Комната не найдена или ошибка подключения');
+            });
+        }
+
+        function updateViewersCount() {
+            document.getElementById('viewers').textContent = `Зрителей: ${viewersCount}`;
+        }
+
+        function stopShare() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            connections.forEach(conn => {
+                conn.close();
+            });
+            connections = [];
+
+            if (peer) {
+                peer.destroy();
+                peer = null;
+            }
+
+            document.getElementById('video').srcObject = null;
+            document.getElementById('info').style.display = 'none';
+            document.getElementById('status').className = 'status offline';
+            viewersCount = 0;
+            isHost = false;
+            roomId = null;
+        }
+    </script>
+</body>
+</html>
